@@ -1,9 +1,7 @@
-use std::io::Write;
-
 use rand::Rng;
 
-mod value_set;
-use value_set::*;
+mod domain;
+use domain::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Symbol {
@@ -60,7 +58,7 @@ fn eval_digits(syms: &[Symbol]) -> Option<(i32, &[Symbol])> {
 
     let mut acc: i32 = 0;
     while let &[Symbol::Digit(digit), ref tail @ ..] = syms {
-        acc = acc.checked_mul(10)?.checked_add(digit as _)?;
+        acc = acc * 10 + (digit as i32);
         syms = tail;
     }
 
@@ -111,7 +109,7 @@ fn valid(syms: &[Symbol]) -> Option<bool> {
     Some(left == right)
 }
 
-fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(ValueSet, &[Symbol])> {
+fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(Domain, &[Symbol])> {
     if !matches!(syms, &[Symbol::Digit(_) | Symbol::Unknown, ..]) {
         return None;
     }
@@ -135,11 +133,12 @@ fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(ValueSet, &[Symbo
         first_digit = false;
     }
 
-    let set = ValueSet::from_range(min_acc..max_acc);
+    let range = Interval::new(min_acc, max_acc);
+    let set = Domain::from_range(range);
     Some((set, syms))
 }
 
-fn eval_ranged_digits(syms: &[Symbol]) -> Option<(ValueSet, &[Symbol])> {
+fn eval_ranged_digits(syms: &[Symbol]) -> Option<(Domain, &[Symbol])> {
     match syms {
         slice @ [Symbol::Digit(_), ..] => eval_ranged_digits_unsigned(slice),
         [Symbol::Minus, slice @ ..] => {
@@ -162,7 +161,7 @@ fn eval_ranged_digits(syms: &[Symbol]) -> Option<(ValueSet, &[Symbol])> {
 
 macro_rules! impl_eval_ranged_op {
     ($name:ident, $op:tt, $symbol:ident, $recurse:ident) => {
-        fn $name(syms: &[Symbol]) -> Option<(ValueSet, &[Symbol])> {
+        fn $name(syms: &[Symbol]) -> Option<(Domain, &[Symbol])> {
             let (mut acc, mut syms) = $recurse(syms)?;
             while let [Symbol::$symbol, ref tail @ ..] = syms {
                 let (val, tail) = $recurse(tail)?;
@@ -183,99 +182,7 @@ impl_eval_ranged_op!(eval_ranged_mul, *, Times, eval_ranged_div);
 impl_eval_ranged_op!(eval_ranged_sub, -, Minus, eval_ranged_mul);
 impl_eval_ranged_op!(eval_ranged_add, +, Plus,  eval_ranged_sub);
 
-//fn eval_ranged_div(syms: &[Symbol]) -> Option<(ValueSet, &[Symbol])> {
-//    let (mut acc, mut syms) = eval_ranged_digits(syms)?;
-//    while let [Symbol::Slash, ref tail @ ..] = syms {
-//        let (val, tail) = eval_ranged_digits(tail)?;
-//
-//        let corners = [
-//            acc.start.checked_div(val.start),
-//            acc.end.checked_div(val.start),
-//            acc.start.checked_div(val.end),
-//            acc.end.checked_div(val.end),
-//            val.contains(&1).then(|| acc.start),
-//            val.contains(&1).then(|| acc.end),
-//            val.contains(&-1).then(|| -acc.start),
-//            val.contains(&-1).then(|| -acc.end),
-//        ];
-//
-//        let min = *corners.iter().flatten().min()?;
-//        let max = *corners.iter().flatten().max()?;
-//        acc = min..max;
-//
-//        syms = tail;
-//    }
-//
-//    Some((acc, syms))
-//}
-//
-//fn eval_ranged_mul(syms: &[Symbol]) -> Option<(ValueSet, &[Symbol])> {
-//    let (mut acc, mut syms) = eval_ranged_div(syms)?;
-//    while let [Symbol::Times, ref tail @ ..] = syms {
-//        let (val, tail) = eval_ranged_div(tail)?;
-//
-//        let corners = [
-//            acc.start * val.start,
-//            acc.end * val.start,
-//            acc.start * val.end,
-//            acc.end * val.end,
-//        ];
-//
-//        let min = *corners.iter().min().unwrap();
-//        let max = *corners.iter().max().unwrap();
-//        acc = min..max;
-//
-//        syms = tail;
-//    }
-//
-//    Some((acc, syms))
-//}
-//
-//fn eval_ranged_sub(syms: &[Symbol]) -> Option<(ValueSet, &[Symbol])> {
-//    let (mut acc, mut syms) = eval_ranged_mul(syms)?;
-//    while let [Symbol::Minus, ref tail @ ..] = syms {
-//        let (val, tail) = eval_ranged_mul(tail)?;
-//
-//        let corners = [
-//            acc.start - val.start,
-//            acc.end - val.start,
-//            acc.start - val.end,
-//            acc.end - val.end,
-//        ];
-//
-//        let min = *corners.iter().min().unwrap();
-//        let max = *corners.iter().max().unwrap();
-//        acc = min..max;
-//
-//        syms = tail;
-//    }
-//
-//    Some((acc, syms))
-//}
-//
-//fn eval_ranged_add(syms: &[Symbol]) -> Option<(ValueSet, &[Symbol])> {
-//    let (mut acc, mut syms) = eval_ranged_sub(syms)?;
-//    while let [Symbol::Plus, ref tail @ ..] = syms {
-//        let (val, tail) = eval_ranged_sub(tail)?;
-//
-//        let corners = [
-//            acc.start + val.start,
-//            acc.end + val.start,
-//            acc.start + val.end,
-//            acc.end + val.end,
-//        ];
-//
-//        let min = *corners.iter().min().unwrap();
-//        let max = *corners.iter().max().unwrap();
-//        acc = min..max;
-//
-//        syms = tail;
-//    }
-//
-//    Some((acc, syms))
-//}
-
-fn eval_ranged(syms: &[Symbol]) -> Option<ValueSet> {
+fn eval_ranged(syms: &[Symbol]) -> Option<Domain> {
     match eval_ranged_add(syms) {
         Some((range, &[])) => Some(range),
         _ => None,
@@ -293,6 +200,8 @@ fn possible(syms: &[Symbol]) -> bool {
         _ => return false,
     };
 
+    //println!("{left} ?= {right}");
+
     !left.intersection(&right).is_empty()
 }
 
@@ -307,6 +216,20 @@ fn factors(num: u32) -> Vec<u32> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Word<const N: usize = 8> {
     symbols: [Symbol; N],
+}
+
+impl std::ops::Deref for Word {
+    type Target = [Symbol];
+
+    fn deref(&self) -> &Self::Target {
+        &self.symbols
+    }
+}
+
+impl std::ops::DerefMut for Word {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.symbols
+    }
 }
 
 impl<const N: usize> Word<N> {
@@ -455,6 +378,42 @@ impl<const N: usize> Word<N> {
     fn is_valid(&self) -> bool {
         valid(&self.symbols).unwrap_or(false)
     }
+
+    fn solve_digits(&mut self) {
+        if !possible(&self.symbols) {
+            return;
+        }
+
+        if let Some(index) = self.symbols.iter().position(|s| s == &Symbol::Unknown) {
+            for digit in 0..10 {
+                self.symbols[index] = Symbol::Digit(digit);
+                self.solve_digits();
+            }
+
+            self.symbols[index] = Symbol::Unknown;
+        } else {
+            print!("{self} ");
+        }
+    }
+
+    fn solve_ops(&mut self, depth: u16) {
+        self.solve_digits();
+
+        if depth > 0 {
+            for index in 0..N {
+                if self.symbols[index] != Symbol::Unknown {
+                    continue;
+                }
+
+                for op in [Symbol::Plus, Symbol::Minus, Symbol::Times, Symbol::Slash] {
+                    self.symbols[index] = op;
+                    self.solve_ops(depth - 1);
+                }
+
+                self.symbols[index] = Symbol::Unknown;
+            }
+        }
+    }
 }
 
 impl<const N: usize> std::fmt::Display for Word<N> {
@@ -487,12 +446,12 @@ impl<const N: usize> std::str::FromStr for Word<N> {
 }
 
 fn main() {
-    for _ in 0..1000 {
-        let word = Word::<8>::random();
-        print!("{word} ");
+    let mut word = Word::<8>::new();
 
-        let mut stdout = std::io::stdout();
-        stdout.flush().unwrap();
+    for index in 0..word.len() {
+        word[index] = Symbol::Equals;
+        word.solve_ops(2);
+        word[index] = Symbol::Unknown;
     }
 }
 
@@ -543,24 +502,36 @@ mod test {
     }
 
     #[test]
+    fn eval_ranged_no_uncertainty() {
+        let symbols = [
+            Symbol::Digit(1),
+            Symbol::Digit(1),
+            Symbol::Plus,
+            Symbol::Digit(5),
+        ];
+        let value = eval_ranged(&symbols).unwrap();
+        assert_eq!(value.range(), Interval::new(16, 16));
+    }
+
+    #[test]
     fn eval_ranged_number_trailing_unknown() {
         let symbols = [Symbol::Minus, Symbol::Digit(3), Symbol::Unknown];
         let value = eval_ranged(&symbols).unwrap();
-        assert_eq!(value.range(), -39..-30);
+        assert_eq!(value.range(), Interval::new(-39, -30));
     }
 
     #[test]
     fn eval_ranged_number_middle_unknown() {
         let symbols = [Symbol::Digit(1), Symbol::Unknown, Symbol::Digit(3)];
         let value = eval_ranged(&symbols).unwrap();
-        assert_eq!(value.range(), 103..193);
+        assert_eq!(value.range(), Interval::new(103, 193));
     }
 
     #[test]
     fn eval_ranged_number_first_unknown() {
         let symbols = [Symbol::Unknown, Symbol::Digit(2), Symbol::Digit(5)];
         let value = eval_ranged(&symbols).unwrap();
-        assert_eq!(value.range(), -25..925);
+        assert_eq!(value.range(), Interval::new(-25, 925));
     }
 
     #[test]
@@ -576,7 +547,7 @@ mod test {
 
         // Min: 1 * 1 + 1 = 2
         // Max: 9 * 9 + 9 = 9 * 10 = 90
-        assert_eq!(value.range(), 2..90);
+        assert_eq!(value.range(), Interval::new(2, 90));
     }
 
     #[test]
@@ -592,7 +563,7 @@ mod test {
 
         // Min: 900 / 9 = 100
         // Max: 999 / 1 = 999
-        assert_eq!(value.range(), 100..999);
+        assert_eq!(value.range(), Interval::new(100, 999));
     }
 
     #[test]
@@ -608,7 +579,7 @@ mod test {
 
         // Min: -99 / 1 = -99
         // Max: 999 / 1 = 999
-        assert_eq!(value.range(), -99..999);
+        assert_eq!(value.range(), Interval::new(-99, 999));
     }
 
     #[test]
@@ -634,121 +605,10 @@ mod test {
         let word: Word<8> = "7?-2?=3?".parse().unwrap();
         assert!(!possible(&word.symbols));
     }
-}
 
-//enum Op {
-//    Add,
-//    Sub,
-//    Mul,
-//    Div,
-//}
-//
-//impl std::fmt::Display for Op {
-//    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//        let s = match self {
-//            Op::Add => "+",
-//            Op::Sub => "-",
-//            Op::Mul => "*",
-//            Op::Div => "/",
-//        };
-//
-//        write!(f, "{s}")
-//    }
-//}
-//
-//enum Expr {
-//    Number(i32),
-//    Binary(Op, Box<Expr>, Box<Expr>),
-//    Negate(Box<Expr>),
-//}
-//
-//impl Expr {
-//    fn eval(&self) -> Option<i32> {
-//        match self {
-//            Self::Number(n) => Some(*n),
-//
-//            Self::Binary(op, left, right) => {
-//                let left = left.eval()?;
-//                let right = right.eval()?;
-//
-//                match op {
-//                    Op::Add => left.checked_add(right),
-//                    Op::Sub => left.checked_sub(right),
-//                    Op::Mul => left.checked_mul(right),
-//                    Op::Div => left.checked_div(right),
-//                }
-//            }
-//
-//            Self::Negate(expr) => expr.eval()?.checked_neg(),
-//        }
-//    }
-//}
-//
-//impl FromStr for Expr {
-//    type Err = ();
-//
-//    fn from_str(s: &str) -> Result<Self, Self::Err> {
-//        fn parse_number(src: &str) -> Option<(Expr, &str)> {
-//            let neg = src.starts_with('-');
-//            let src = &src[neg as usize..];
-//
-//            let len = src.find(|c| !matches!(c, '0'..='9')).unwrap_or(src.len());
-//            let (num, r) = src.split_at(len);
-//            let mut num: i32 = num.parse().ok()?;
-//            if neg {
-//                num = num.checked_neg()?;
-//            }
-//
-//            Some((Expr::Number(num), r))
-//        }
-//
-//        fn parse_mul(src: &str) -> Option<(Expr, &str)> {
-//            let (left, src) = parse_number(src)?;
-//            if src.starts_with('*') {
-//                let (right, src) = parse_mul(&src[1..])?;
-//                return Some((Expr::Binary(Op::Mul, Box::new(left), Box::new(right)), src));
-//            }
-//            Some((left, src))
-//        }
-//
-//        fn parse_div(src: &str) -> Option<(Expr, &str)> {
-//            let (left, src) = parse_mul(src)?;
-//            if src.starts_with('/') {
-//                let (right, src) = parse_div(&src[1..])?;
-//                return Some((Expr::Binary(Op::Div, Box::new(left), Box::new(right)), src));
-//            }
-//            Some((left, src))
-//        }
-//
-//        fn parse_sub(src: &str) -> Option<(Expr, &str)> {
-//            let (left, src) = parse_div(src)?;
-//            if src.starts_with('-') {
-//                let (right, src) = parse_sub(&src[1..])?;
-//                return Some((Expr::Binary(Op::Sub, Box::new(left), Box::new(right)), src));
-//            }
-//            Some((left, src))
-//        }
-//
-//        fn parse_add(src: &str) -> Option<(Expr, &str)> {
-//            let (left, src) = parse_sub(src)?;
-//            if src.starts_with('+') {
-//                let (right, src) = parse_add(&src[1..])?;
-//                return Some((Expr::Binary(Op::Add, Box::new(left), Box::new(right)), src));
-//            }
-//            Some((left, src))
-//        }
-//
-//        let (expr, _) = parse_add(s).ok_or(())?;
-//        Ok(expr)
-//    }
-//}
-//
-//impl std::fmt::Display for Expr {
-//    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//        match self {
-//            Expr::Number(n) => write!(f, "{}", n),
-//            Expr::Binary(op, left, right) => write!(f, "{}{}{}", left, op, right),
-//            Expr::Negate(expr) => write!(f, "-{}", expr),
-//        }
-//    }
-//}
+    #[test]
+    fn possible_false_tricky() {
+        let word: Word<8> = "??/?=???".parse().unwrap();
+        assert!(!possible(&word.symbols));
+    }
+}
