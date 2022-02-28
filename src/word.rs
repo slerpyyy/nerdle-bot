@@ -1,5 +1,3 @@
-use rand::Rng;
-
 use crate::domain::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,10 +14,7 @@ pub enum Symbol {
 impl std::fmt::Display for Symbol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Symbol::Digit(d) => {
-                let idx = *d as usize;
-                &"0123456789"[idx..=idx]
-            }
+            Symbol::Digit(d) => return write!(f, "{d}"),
             Symbol::Plus => "+",
             Symbol::Minus => "-",
             Symbol::Times => "*",
@@ -32,8 +27,14 @@ impl std::fmt::Display for Symbol {
     }
 }
 
+#[derive(Debug)]
+pub struct SymbolParseError {
+    pub input: String,
+    pub position: usize,
+}
+
 impl std::str::FromStr for Symbol {
-    type Err = ();
+    type Err = SymbolParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.as_bytes() {
@@ -44,7 +45,10 @@ impl std::str::FromStr for Symbol {
             &[b'/'] => Ok(Symbol::Slash),
             &[b'='] => Ok(Symbol::Equals),
             &[b'?'] => Ok(Symbol::Unknown),
-            _ => Err(()),
+            _ => Err(SymbolParseError {
+                input: s.to_string(),
+                position: 0,
+            }),
         }
     }
 }
@@ -116,7 +120,7 @@ fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(Domain, &[Symbol]
     let mut min_acc: i32 = 0;
     let mut max_acc: i32 = 0;
 
-    let mut first_digit = true;
+    //let mut first_digit = true;
     while let [digit, tail @ ..] = syms {
         let (min_digit, max_digit) = match *digit {
             Symbol::Digit(d) => (d, d),
@@ -129,7 +133,7 @@ fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(Domain, &[Symbol]
         max_acc = max_acc * 10 + (max_digit as i32);
 
         syms = tail;
-        first_digit = false;
+        //first_digit = false;
     }
 
     let range = Interval::new(min_acc, max_acc);
@@ -204,14 +208,6 @@ fn possible(syms: &[Symbol]) -> bool {
     !left.intersection(&right).is_empty()
 }
 
-fn _num_length(n: i32) -> usize {
-    format!("{n}").len()
-}
-
-fn factors(num: u32) -> Vec<u32> {
-    (1..num).filter(|d| num % d == 0).collect()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Word<const N: usize = 8> {
     symbols: [Symbol; N],
@@ -238,132 +234,16 @@ impl<const N: usize> Word<N> {
         }
     }
 
-    fn random() -> Self {
-        fn write_symbol(slice: &mut [Symbol], symbol: Symbol) -> Result<&mut [Symbol], ()> {
-            match slice {
-                [head, tail @ ..] => {
-                    *head = symbol;
-                    Ok(tail)
-                }
-                _ => Err(()),
-            }
-        }
-
-        fn write_number(mut slice: &mut [Symbol], mut num: i32) -> Result<&mut [Symbol], ()> {
-            if num == 0 {
-                return write_symbol(slice, Symbol::Digit(0));
-            }
-
-            if num < 0 {
-                slice = write_symbol(slice, Symbol::Minus)?;
-                num = -num;
-            };
-
-            while num > 0 {
-                slice = write_symbol(slice, Symbol::Digit((num % 10) as _))?;
-                num /= 10;
-            }
-
-            Ok(slice)
-        }
-
-        fn random_expr<'s>(
-            mut slice: &'s mut [Symbol],
-            rng: &mut rand::rngs::ThreadRng,
-            target: i32,
-            allow_additive: bool,
-        ) -> Result<&'s mut [Symbol], ()> {
-            if slice.len() < 3 || rng.gen_bool(0.3) {
-                return write_number(slice, target);
-            } else {
-                let choice: u8 = rng.gen_range(match allow_additive {
-                    true => 0..4,
-                    false => 2..4,
-                });
-
-                match choice {
-                    0 => {
-                        let r = target.abs();
-                        let other = rng.gen_range(-r..=r);
-                        slice = random_expr(slice, rng, target - other, false)?;
-                        slice = write_symbol(slice, Symbol::Plus)?;
-                        slice = random_expr(slice, rng, other, false)?;
-                    }
-                    1 => {
-                        let r = target.abs();
-                        let other = rng.gen_range(-r..=r);
-                        slice = random_expr(slice, rng, target + other, false)?;
-                        slice = write_symbol(slice, Symbol::Minus)?;
-                        slice = random_expr(slice, rng, other, false)?;
-                    }
-                    2 => {
-                        let factors = factors(target.abs() as _);
-                        if factors.is_empty() {
-                            return Err(());
-                        }
-
-                        let index = rng.gen_range(0..factors.len());
-                        let other = factors[index] as _;
-                        slice = write_number(slice, target / other)?;
-                        slice = write_symbol(slice, Symbol::Times)?;
-                        slice = write_number(slice, other)?;
-                    }
-                    3 => {
-                        let r = (target.abs() as f32).sqrt() as i32;
-                        let other = rng.gen_range(-r..=r);
-                        slice = write_number(slice, target * other)?;
-                        slice = write_symbol(slice, Symbol::Slash)?;
-                        slice = write_number(slice, other)?;
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            Ok(slice)
-        }
-
-        let mut word = Self::new();
-        let mut rng = rand::thread_rng();
-
-        let min = -i32::pow(10, N as u32 / 2 - 1);
-        let max = i32::pow(10, N as u32 / 2);
-
-        loop {
-            let target = rng.gen_range(min..max);
-            let mut end = N - 1;
-
-            {
-                let mut target = target;
-                loop {
-                    let digit = target % 10;
-                    word.symbols[end] = Symbol::Digit(digit as _);
-
-                    target /= 10;
-                    end -= 1;
-
-                    if target == 0 {
-                        word.symbols[end] = Symbol::Equals;
-                        break;
-                    }
-                }
-            }
-
-            let res = random_expr(&mut word.symbols[..end], &mut rng, target, true);
-
-            if matches!(res, Ok(s) if s.is_empty()) && word.is_valid() {
-                break;
-            }
-        }
-
-        word
-    }
-
     fn is_valid(&self) -> bool {
         valid(&self.symbols).unwrap_or(false)
     }
 
+    fn is_possible(&self) -> bool {
+        possible(&self.symbols)
+    }
+
     fn solve_digits(&mut self, observer: &mut impl FnMut(&Self)) {
-        if !possible(&self.symbols) {
+        if !self.is_possible() {
             return;
         }
 
@@ -421,17 +301,24 @@ impl<const N: usize> std::fmt::Display for Word<N> {
 }
 
 impl<const N: usize> std::str::FromStr for Word<N> {
-    type Err = ();
+    type Err = SymbolParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.len() != N {
-            return Err(());
+            return Err(SymbolParseError {
+                input: s.to_string(),
+                position: N,
+            });
         }
 
         let mut symbols = [Symbol::Times; N];
         for index in 0..symbols.len() {
             let sub = &s[index..=index];
-            let symbol: Symbol = sub.parse()?;
+            let symbol: Symbol = sub.parse().map_err(|mut err: Self::Err| {
+                err.position = index;
+                err
+            })?;
+
             symbols[index] = symbol;
         }
 
