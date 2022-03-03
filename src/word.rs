@@ -1,6 +1,6 @@
 use crate::domain::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Symbol {
     Digit(u8),
     Plus,
@@ -120,11 +120,12 @@ fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(Domain, &[Symbol]
     let mut min_acc: i32 = 0;
     let mut max_acc: i32 = 0;
 
-    //let mut first_digit = true;
+    let mut first_digit = true;
     while let [digit, tail @ ..] = syms {
         let (min_digit, max_digit) = match *digit {
+            Symbol::Digit(0) if first_digit => return None,
             Symbol::Digit(d) => (d, d),
-            //Symbol::Unknown if first_digit => (1, 9),
+            Symbol::Unknown if first_digit => (1, 9),
             Symbol::Unknown => (0, 9),
             _ => break,
         };
@@ -133,7 +134,7 @@ fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(Domain, &[Symbol]
         max_acc = max_acc * 10 + (max_digit as i32);
 
         syms = tail;
-        //first_digit = false;
+        first_digit = false;
     }
 
     let range = Interval::new(min_acc, max_acc);
@@ -208,12 +209,12 @@ fn possible(syms: &[Symbol]) -> bool {
     !left.intersection(&right).is_empty()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Word<const N: usize = 8> {
-    symbols: [Symbol; N],
+    pub symbols: [Symbol; N],
 }
 
-impl std::ops::Deref for Word {
+impl<const N: usize> std::ops::Deref for Word<N> {
     type Target = [Symbol];
 
     fn deref(&self) -> &Self::Target {
@@ -221,9 +222,15 @@ impl std::ops::Deref for Word {
     }
 }
 
-impl std::ops::DerefMut for Word {
+impl<const N: usize> std::ops::DerefMut for Word<N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.symbols
+    }
+}
+
+impl<const N: usize> AsRef<[Symbol]> for Word<N> {
+    fn as_ref(&self) -> &[Symbol] {
+        &self.symbols
     }
 }
 
@@ -242,15 +249,19 @@ impl<const N: usize> Word<N> {
         possible(&self.symbols)
     }
 
-    fn solve_digits(&mut self, observer: &mut impl FnMut(&Self)) {
-        if !self.is_possible() {
+    fn solve_digits(
+        &mut self,
+        predicate: &mut impl FnMut(&Self) -> bool,
+        observer: &mut impl FnMut(&Self),
+    ) {
+        if !self.is_possible() || !predicate(&self) {
             return;
         }
 
         if let Some(index) = self.symbols.iter().position(|s| s == &Symbol::Unknown) {
             for digit in 0..10 {
                 self.symbols[index] = Symbol::Digit(digit);
-                self.solve_digits(observer);
+                self.solve_digits(predicate, observer);
             }
 
             self.symbols[index] = Symbol::Unknown;
@@ -259,18 +270,28 @@ impl<const N: usize> Word<N> {
         }
     }
 
-    fn solve_ops(&mut self, observer: &mut impl FnMut(&Self), depth: u16) {
-        self.solve_digits(observer);
+    fn solve_ops(
+        &mut self,
+        predicate: &mut impl FnMut(&Self) -> bool,
+        observer: &mut impl FnMut(&Self),
+        start: usize,
+        depth: u16,
+    ) {
+        if !predicate(&self) {
+            return;
+        }
+
+        self.solve_digits(predicate, observer);
 
         if depth > 0 {
-            for index in 0..N {
+            for index in start..N {
                 if self.symbols[index] != Symbol::Unknown {
                     continue;
                 }
 
                 for op in [Symbol::Plus, Symbol::Minus, Symbol::Times, Symbol::Slash] {
                     self.symbols[index] = op;
-                    self.solve_ops(observer, depth - 1);
+                    self.solve_ops(predicate, observer, index + 1, depth - 1);
                 }
 
                 self.symbols[index] = Symbol::Unknown;
@@ -278,14 +299,122 @@ impl<const N: usize> Word<N> {
         }
     }
 
-    pub fn solve(mut observer: impl FnMut(&Self)) {
-        let mut word = Self::new();
-        let max_depth = (N / 2) as _;
+    pub fn query(
+        &mut self,
+        mut predicate: impl FnMut(&Self) -> bool,
+        mut observer: impl FnMut(&Self),
+    ) {
+        let max_ops = N / 2;
+        if self.contains(&Symbol::Equals) {
+            self.solve_ops(&mut predicate, &mut observer, 0, max_ops as _);
+        } else {
+            for index in 1..N.saturating_sub(1) {
+                self.symbols[index] = Symbol::Equals;
+                self.solve_ops(&mut predicate, &mut observer, 0, max_ops as _);
+                self.symbols[index] = Symbol::Unknown;
+            }
+        }
+    }
 
-        for index in 0..N {
-            word.symbols[index] = Symbol::Equals;
-            word.solve_ops(&mut observer, max_depth);
-            word.symbols[index] = Symbol::Unknown;
+    pub fn query_stacked(
+        &mut self,
+        mut predicate: impl FnMut(&Self) -> bool,
+        mut observer: impl FnMut(&Self),
+    ) {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum Todo {
+            SetEquals(usize),
+            SetOperator(usize, u8, u16),
+            SetDigit(usize, u8),
+            Unset(usize),
+        }
+
+        let mut stack = Vec::<Todo>::with_capacity(2 * N);
+        stack.push(Todo::SetEquals(0));
+
+        while let Some(top) = stack.pop() {
+            match top {
+                Todo::Unset(index) => {
+                    if let Some(sym) = self.symbols.get_mut(index) {
+                        *sym = Symbol::Unknown;
+                    }
+                }
+
+                Todo::SetEquals(index) => {
+                    debug_assert_eq!(&stack, &[]);
+
+                    if index >= N {
+                        continue;
+                    }
+
+                    stack.push(Todo::SetEquals(index + 1));
+
+                    let curr = &mut self.symbols[index];
+                    if let &Symbol::Unknown = &curr {
+                        self.symbols[index] = Symbol::Equals;
+
+                        stack.push(Todo::Unset(index));
+
+                        let max_ops = N - (N / 3);
+                        stack.push(Todo::SetOperator(0, 0, max_ops as _));
+                        stack.push(Todo::SetDigit(0, 0));
+                    }
+                }
+
+                Todo::SetOperator(index, k, depth) => {
+                    if index >= N || depth == 0 {
+                        continue;
+                    }
+
+                    if k > 3 {
+                        stack.push(Todo::SetOperator(index + 1, 0, depth));
+                        stack.push(Todo::Unset(index));
+                        continue;
+                    }
+
+                    let curr = &mut self.symbols[index];
+                    if k == 0 && curr != &Symbol::Unknown {
+                        stack.push(Todo::SetOperator(index + 1, 0, depth));
+                        continue;
+                    }
+
+                    stack.push(Todo::SetOperator(index, k + 1, depth));
+
+                    *curr = [Symbol::Plus, Symbol::Minus, Symbol::Times, Symbol::Slash][k as usize];
+
+                    stack.push(Todo::SetOperator(0, 0, depth - 1));
+                    stack.push(Todo::SetDigit(0, 0));
+                }
+
+                Todo::SetDigit(index, digit) => {
+                    if !self.is_possible() || !predicate(&self) {
+                        continue;
+                    }
+
+                    if index >= N {
+                        observer(&self);
+                        continue;
+                    }
+
+                    if digit > 9 {
+                        stack.push(Todo::Unset(index));
+                        continue;
+                    }
+
+                    let curr = &mut self.symbols[index];
+                    if digit == 0 && curr != &Symbol::Unknown {
+                        stack.push(Todo::SetDigit(index + 1, 0));
+                        continue;
+                    }
+
+                    *curr = Symbol::Digit(digit);
+
+                    stack.push(Todo::SetDigit(index, digit + 1));
+                    stack.push(Todo::Unset(index));
+
+                    stack.push(Todo::SetDigit(index + 1, 0));
+                }
+            }
         }
     }
 }

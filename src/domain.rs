@@ -93,6 +93,10 @@ impl Domain {
         self.ranges.iter().all(|r| r.is_empty())
     }
 
+    pub fn contains(&self, item: i32) -> bool {
+        self.ranges.iter().any(|r| r.contains(item))
+    }
+
     pub fn range(&self) -> Interval {
         self.ranges
             .iter()
@@ -193,37 +197,50 @@ impl std::ops::Div for Domain {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        Self::from_outer_union(&self.ranges, &rhs.ranges, |a, b| {
-            if a.len() == 1 && b.len() == 1 {
-                let (a, b) = (a.start, b.start);
+        let mut out = Self::new();
 
-                return if a.checked_rem(b) == Some(0) {
-                    let q = a / b;
-                    Interval::new(q, q)
-                } else {
-                    Interval::empty()
-                };
+        let right_iter = rhs
+            .ranges
+            .into_iter()
+            .flat_map(|full| {
+                let neg = Interval::new(full.start, full.end.min(-1));
+                let pos = Interval::new(full.start.max(1), full.end);
+                [neg, pos]
+            })
+            .filter(|inter| !inter.is_empty());
+
+        for right in right_iter {
+            for left in &self.ranges {
+                if right.len() == 1 && left.len() == 1 {
+                    let right = right.start;
+                    let left = left.start;
+
+                    if left.checked_rem(right) == Some(0) {
+                        let q = left / right;
+                        out.add_range(Interval::new(q, q));
+                    }
+
+                    continue;
+                }
+
+                let corners = [
+                    left.start.checked_div(right.start),
+                    left.end.checked_div(right.start),
+                    left.start.checked_div(right.end),
+                    left.end.checked_div(right.end),
+                ];
+
+                let min = corners.iter().flatten().min();
+                let max = corners.iter().flatten().max();
+
+                if let (Some(&min), Some(&max)) = (min, max) {
+                    let inter = Interval::new(min, max);
+                    out.add_range(inter);
+                }
             }
+        }
 
-            let corners = [
-                a.start.checked_div(b.start),
-                a.end.checked_div(b.start),
-                a.start.checked_div(b.end),
-                a.end.checked_div(b.end),
-                b.contains(1).then(|| a.start),
-                b.contains(1).then(|| a.end),
-                b.contains(-1).then(|| -a.start),
-                b.contains(-1).then(|| -a.end),
-            ];
-
-            let min = corners.iter().flatten().min();
-            let max = corners.iter().flatten().max();
-
-            match (min, max) {
-                (Some(&min), Some(&max)) => Interval::new(min, max),
-                _ => Interval::empty(),
-            }
-        })
+        out
     }
 }
 
@@ -281,5 +298,46 @@ mod test {
         set.add_range(Interval::new(3, 9));
 
         assert_eq!(set.ranges, &[Interval::new(2, 12)]);
+    }
+
+    #[test]
+    fn domain_div_simple() {
+        let left = Domain::from_range(Interval::new(25, 50));
+        let right = Domain::from_range(Interval::new(-5, 5));
+
+        let result = left / right;
+        println!("{result}");
+
+        for x in 25..=50 {
+            for y in -5..=5 {
+                if y == 0 {
+                    continue;
+                }
+
+                assert!(result.contains(x / y));
+            }
+        }
+    }
+
+    #[test]
+    fn domain_div_sub_10() {
+        const LIM: i32 = 10;
+
+        let left = Domain::from_range(Interval::new(-LIM, LIM));
+        let right = left.clone();
+
+        let expected = left.clone();
+        let result = left / right;
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn domain_div_by_zero() {
+        let left = Domain::from_range(Interval::new(-2, 5));
+        let right = Domain::from_range(Interval::new(0, 0));
+        let result = left / right;
+
+        assert!(result.is_empty());
     }
 }
