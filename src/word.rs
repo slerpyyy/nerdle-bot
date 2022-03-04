@@ -1,6 +1,6 @@
 use crate::domain::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Symbol {
     Digit(u8),
     Plus,
@@ -209,7 +209,7 @@ fn possible(syms: &[Symbol]) -> bool {
     !left.intersection(&right).is_empty()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Word<const N: usize = 8> {
     pub symbols: [Symbol; N],
 }
