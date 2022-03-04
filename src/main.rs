@@ -3,7 +3,8 @@
 use std::{
     collections::HashMap,
     io::Write,
-    mem::MaybeUninit, sync::atomic::{AtomicUsize, Ordering},
+    mem::MaybeUninit,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use rayon::prelude::*;
@@ -81,7 +82,7 @@ fn compute_entropy<const N: usize>(guess: Word<N>, word_list: &[Word<N>]) -> f32
 
 fn main() {
     println!("Generating words");
-    let words = {
+    let mut words = {
         let mut acc = Vec::new();
         let mut word = Word::<N>::new();
 
@@ -97,27 +98,66 @@ fn main() {
     let total = words.len();
     println!(" | total words: {total}");
 
-    println!("Computing entropy");
-    let counter = AtomicUsize::new(0);
-    let mut entropy_values: Vec<_> = words
-        .par_iter()
-        .map(|guess| compute_entropy(guess.clone(), &words))
-        .enumerate()
-        .inspect(|_| {
-            let k = counter.fetch_add(1, Ordering::AcqRel);
-            if k % 100 == (total - 1) % 100 {
-                let progress = k as f32 / total as f32;
-                print!("\r | progress: {:.2}%", 100.0 * progress);
-                std::io::stdout().flush().unwrap();
+    while !words.is_empty() {
+        println!("Computing entropy");
+        let counter = AtomicUsize::new(0);
+        let mut entropy_values: Vec<_> = words
+            .par_iter()
+            .map(|guess| compute_entropy(guess.clone(), &words))
+            .enumerate()
+            .inspect(|_| {
+                let k = counter.fetch_add(1, Ordering::AcqRel);
+                if k % 100 == (total - 1) % 100 {
+                    let progress = k as f32 / total as f32;
+                    print!("\r | progress: {:.2}%", 100.0 * progress);
+                    std::io::stdout().flush().unwrap();
+                }
+            })
+            .collect();
+        print!("\n");
+
+        println!("Sort by entropy");
+        entropy_values.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap().reverse());
+
+        for (index, entropy) in entropy_values.iter().take(10) {
+            println!(" | {} ({:.3} bits)", words[*index], entropy);
+        }
+
+        println!("Dialog");
+
+        let guess: Word<N> = {
+            print!(" | guess: ");
+            std::io::stdout().flush().unwrap();
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).unwrap();
+            input[..N].parse().unwrap()
+        };
+
+        let hints: [Color; N] = {
+            print!(" | hints: ");
+            std::io::stdout().flush().unwrap();
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).unwrap();
+
+            let mut hints = [Color::Black; N];
+            for (char, hint) in input.chars().zip(&mut hints) {
+                *hint = match char {
+                    'b' => Color::Black,
+                    'p' => Color::Purple,
+                    'g' => Color::Green,
+                    _ => panic!("idk what {char:?} is"),
+                };
             }
-        })
-        .collect();
-    print!("\n");
 
-    println!("Sort by entropy");
-    entropy_values.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap().reverse());
+            hints
+        };
 
-    for (index, entropy) in entropy_values.iter().take(10) {
-        println!(" | {} ({:.3} bits)", words[*index], entropy);
+        if let Some(index) = words.iter().position(|word| word == &guess) {
+            words.remove(index);
+        }
+
+        words.retain(|word| compare_words(&guess, word) == hints);
     }
 }
