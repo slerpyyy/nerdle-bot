@@ -53,67 +53,8 @@ impl std::str::FromStr for Symbol {
     }
 }
 
-fn eval_digits(syms: &[Symbol]) -> Option<(i32, &[Symbol])> {
-    let (neg, mut syms) = match syms {
-        &[Symbol::Minus, ref tail @ ..] => (true, tail),
-        slice => (false, slice),
-    };
-
-    let mut acc: i32 = 0;
-    while let &[Symbol::Digit(digit), ref tail @ ..] = syms {
-        acc = acc * 10 + (digit as i32);
-        syms = tail;
-    }
-
-    if neg {
-        acc = -acc;
-    }
-
-    Some((acc, syms))
-}
-
-macro_rules! impl_eval_op {
-    ($name:ident, $checked_op:ident, $symbol:ident, $recurse:ident) => {
-        fn $name(syms: &[Symbol]) -> Option<(i32, &[Symbol])> {
-            let (mut acc, mut syms) = $recurse(syms)?;
-            while let [Symbol::$symbol, ref tail @ ..] = syms {
-                let (val, tail) = $recurse(tail)?;
-                acc = acc.$checked_op(val)?;
-                syms = tail;
-            }
-
-            Some((acc, syms))
-        }
-    };
-}
-
-impl_eval_op!(eval_div, checked_div, Slash, eval_digits);
-impl_eval_op!(eval_mul, checked_mul, Times, eval_div);
-impl_eval_op!(eval_sub, checked_sub, Minus, eval_mul);
-impl_eval_op!(eval_add, checked_add, Plus, eval_sub);
-
-fn eval(syms: &[Symbol]) -> Option<i32> {
-    let (val, tail) = eval_add(syms)?;
-    if !tail.is_empty() {
-        return None;
-    }
-
-    Some(val)
-}
-
-fn valid(syms: &[Symbol]) -> Option<bool> {
-    let (left, syms) = eval_add(syms)?;
-    let syms = match syms {
-        [Symbol::Equals, tail @ ..] => tail,
-        _ => return None,
-    };
-
-    let right = eval(syms)?;
-    Some(left == right)
-}
-
-fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(Domain, &[Symbol])> {
-    if !matches!(syms, &[Symbol::Digit(_) | Symbol::Unknown, ..]) {
+fn eval_ranged_digits_unsigned(mut symbols: &[Symbol]) -> Option<(Domain, &[Symbol])> {
+    if !matches!(symbols, &[Symbol::Digit(_) | Symbol::Unknown, ..]) {
         return None;
     }
 
@@ -121,7 +62,7 @@ fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(Domain, &[Symbol]
     let mut max_acc: i32 = 0;
 
     let mut first_digit = true;
-    while let [digit, tail @ ..] = syms {
+    while let [digit, tail @ ..] = symbols {
         let (min_digit, max_digit) = match *digit {
             Symbol::Digit(0) if first_digit => return None,
             Symbol::Digit(d) => (d, d),
@@ -133,17 +74,17 @@ fn eval_ranged_digits_unsigned(mut syms: &[Symbol]) -> Option<(Domain, &[Symbol]
         min_acc = min_acc * 10 + (min_digit as i32);
         max_acc = max_acc * 10 + (max_digit as i32);
 
-        syms = tail;
+        symbols = tail;
         first_digit = false;
     }
 
     let range = Interval::new(min_acc, max_acc);
     let set = Domain::from_range(range);
-    Some((set, syms))
+    Some((set, symbols))
 }
 
-fn eval_ranged_digits(syms: &[Symbol]) -> Option<(Domain, &[Symbol])> {
-    match syms {
+fn eval_ranged_digits(symbols: &[Symbol]) -> Option<(Domain, &[Symbol])> {
+    match symbols {
         slice @ [Symbol::Digit(_), ..] => eval_ranged_digits_unsigned(slice),
         [Symbol::Minus, slice @ ..] => {
             let (range, residual) = eval_ranged_digits_unsigned(slice)?;
@@ -165,18 +106,18 @@ fn eval_ranged_digits(syms: &[Symbol]) -> Option<(Domain, &[Symbol])> {
 
 macro_rules! impl_eval_ranged_op {
 ($name:ident, $op:tt, $symbol:ident, $recurse:ident) => {
-    fn $name(syms: &[Symbol]) -> Option<(Domain, &[Symbol])> {
-        let (mut acc, mut syms) = $recurse(syms)?;
-        while let [Symbol::$symbol, ref tail @ ..] = syms {
-            let (val, tail) = $recurse(tail)?;
-            acc = acc $op val;
-            if acc.is_empty() {
+    fn $name(symbols: &[Symbol]) -> Option<(Domain, &[Symbol])> {
+        let (mut left, mut symbols) = $recurse(symbols)?;
+        while let [Symbol::$symbol, ref tail @ ..] = symbols {
+            let (right, tail) = $recurse(tail)?;
+            left = left $op right;
+            if left.is_empty() {
                 return None;
             }
-            syms = tail;
+            symbols = tail;
         }
 
-        Some((acc, syms))
+        Some((left, symbols))
     }
 };
 }
@@ -186,20 +127,30 @@ impl_eval_ranged_op!(eval_ranged_mul, *, Times, eval_ranged_div);
 impl_eval_ranged_op!(eval_ranged_sub, -, Minus, eval_ranged_mul);
 impl_eval_ranged_op!(eval_ranged_add, +, Plus,  eval_ranged_sub);
 
-fn eval_ranged(syms: &[Symbol]) -> Option<Domain> {
-    match eval_ranged_add(syms) {
+#[cfg(test)]
+fn eval_ranged(symbols: &[Symbol]) -> Option<Domain> {
+    match eval_ranged_add(symbols) {
         Some((range, &[])) => Some(range),
         _ => None,
     }
 }
 
-fn possible(syms: &[Symbol]) -> bool {
-    let (left, syms) = match eval_ranged_add(syms) {
+#[cfg(test)]
+fn eval(symbols: &[Symbol]) -> Option<i32> {
+    let interval = eval_ranged(symbols)?.range();
+    match interval.len() {
+        1 => Some(interval.start),
+        _ => None,
+    }
+}
+
+fn possible(symbols: &[Symbol]) -> bool {
+    let (left, symbols) = match eval_ranged_add(symbols) {
         Some((left, [Symbol::Equals, tail @ ..])) => (left, tail),
         _ => return false,
     };
 
-    let right = match eval_ranged_digits(syms) {
+    let right = match eval_ranged_digits(symbols) {
         Some((right, &[])) => right,
         _ => return false,
     };
@@ -241,27 +192,24 @@ impl<const N: usize> Word<N> {
         }
     }
 
-    fn is_valid(&self) -> bool {
-        valid(&self.symbols).unwrap_or(false)
-    }
-
     fn is_possible(&self) -> bool {
         possible(&self.symbols)
     }
 
-    fn solve_digits(
-        &mut self,
-        predicate: &mut impl FnMut(&Self) -> bool,
-        observer: &mut impl FnMut(&Self),
-    ) {
-        if !self.is_possible() || !predicate(&self) {
+    #[cfg(test)]
+    fn is_valid(&self) -> bool {
+        self.symbols.iter().all(|sym| sym != &Symbol::Unknown) && self.is_possible()
+    }
+
+    fn search_digits(&mut self, observer: &mut impl FnMut(&Self)) {
+        if !self.is_possible() {
             return;
         }
 
         if let Some(index) = self.symbols.iter().position(|s| s == &Symbol::Unknown) {
             for digit in 0..10 {
                 self.symbols[index] = Symbol::Digit(digit);
-                self.solve_digits(predicate, observer);
+                self.search_digits(observer);
             }
 
             self.symbols[index] = Symbol::Unknown;
@@ -270,18 +218,8 @@ impl<const N: usize> Word<N> {
         }
     }
 
-    fn solve_ops(
-        &mut self,
-        predicate: &mut impl FnMut(&Self) -> bool,
-        observer: &mut impl FnMut(&Self),
-        start: usize,
-        depth: u16,
-    ) {
-        if !predicate(&self) {
-            return;
-        }
-
-        self.solve_digits(predicate, observer);
+    fn search_ops(&mut self, observer: &mut impl FnMut(&Self), start: usize, depth: u16) {
+        self.search_digits(observer);
 
         if depth > 0 {
             for index in start..N {
@@ -291,7 +229,7 @@ impl<const N: usize> Word<N> {
 
                 for op in [Symbol::Plus, Symbol::Minus, Symbol::Times, Symbol::Slash] {
                     self.symbols[index] = op;
-                    self.solve_ops(predicate, observer, index + 1, depth - 1);
+                    self.search_ops(observer, index + 1, depth - 1);
                 }
 
                 self.symbols[index] = Symbol::Unknown;
@@ -299,121 +237,15 @@ impl<const N: usize> Word<N> {
         }
     }
 
-    pub fn query(
-        &mut self,
-        mut predicate: impl FnMut(&Self) -> bool,
-        mut observer: impl FnMut(&Self),
-    ) {
+    pub fn search(&mut self, mut observer: impl FnMut(&Self)) {
         let max_ops = N / 2;
         if self.contains(&Symbol::Equals) {
-            self.solve_ops(&mut predicate, &mut observer, 0, max_ops as _);
+            self.search_ops(&mut observer, 0, max_ops as _);
         } else {
             for index in 1..N.saturating_sub(1) {
                 self.symbols[index] = Symbol::Equals;
-                self.solve_ops(&mut predicate, &mut observer, 0, max_ops as _);
+                self.search_ops(&mut observer, 0, max_ops as _);
                 self.symbols[index] = Symbol::Unknown;
-            }
-        }
-    }
-
-    pub fn query_stacked(
-        &mut self,
-        mut predicate: impl FnMut(&Self) -> bool,
-        mut observer: impl FnMut(&Self),
-    ) {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        enum Todo {
-            SetEquals(usize),
-            SetOperator(usize, u8, u16),
-            SetDigit(usize, u8),
-            Unset(usize),
-        }
-
-        let mut stack = Vec::<Todo>::with_capacity(2 * N);
-        stack.push(Todo::SetEquals(0));
-
-        while let Some(top) = stack.pop() {
-            match top {
-                Todo::Unset(index) => {
-                    if let Some(sym) = self.symbols.get_mut(index) {
-                        *sym = Symbol::Unknown;
-                    }
-                }
-
-                Todo::SetEquals(index) => {
-                    debug_assert_eq!(&stack, &[]);
-
-                    if index >= N {
-                        continue;
-                    }
-
-                    stack.push(Todo::SetEquals(index + 1));
-
-                    let curr = &mut self.symbols[index];
-                    if let &Symbol::Unknown = &curr {
-                        self.symbols[index] = Symbol::Equals;
-
-                        stack.push(Todo::Unset(index));
-
-                        let max_ops = N - (N / 3);
-                        stack.push(Todo::SetOperator(0, 0, max_ops as _));
-                        stack.push(Todo::SetDigit(0, 0));
-                    }
-                }
-
-                Todo::SetOperator(index, k, depth) => {
-                    if index >= N || depth == 0 {
-                        continue;
-                    }
-
-                    if k > 3 {
-                        stack.push(Todo::SetOperator(index + 1, 0, depth));
-                        stack.push(Todo::Unset(index));
-                        continue;
-                    }
-
-                    let curr = &mut self.symbols[index];
-                    if k == 0 && curr != &Symbol::Unknown {
-                        stack.push(Todo::SetOperator(index + 1, 0, depth));
-                        continue;
-                    }
-
-                    stack.push(Todo::SetOperator(index, k + 1, depth));
-
-                    *curr = [Symbol::Plus, Symbol::Minus, Symbol::Times, Symbol::Slash][k as usize];
-
-                    stack.push(Todo::SetOperator(0, 0, depth - 1));
-                    stack.push(Todo::SetDigit(0, 0));
-                }
-
-                Todo::SetDigit(index, digit) => {
-                    if !self.is_possible() || !predicate(&self) {
-                        continue;
-                    }
-
-                    if index >= N {
-                        observer(&self);
-                        continue;
-                    }
-
-                    if digit > 9 {
-                        stack.push(Todo::Unset(index));
-                        continue;
-                    }
-
-                    let curr = &mut self.symbols[index];
-                    if digit == 0 && curr != &Symbol::Unknown {
-                        stack.push(Todo::SetDigit(index + 1, 0));
-                        continue;
-                    }
-
-                    *curr = Symbol::Digit(digit);
-
-                    stack.push(Todo::SetDigit(index, digit + 1));
-                    stack.push(Todo::Unset(index));
-
-                    stack.push(Todo::SetDigit(index + 1, 0));
-                }
             }
         }
     }

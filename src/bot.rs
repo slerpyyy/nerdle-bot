@@ -1,8 +1,6 @@
 use std::{
     collections::{BinaryHeap, HashMap},
-    io::Write,
     mem::MaybeUninit,
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use ordered_float::NotNan;
@@ -81,8 +79,7 @@ impl<const N: usize> Bot<N> {
     pub fn init() -> Self {
         let mut words = Vec::new();
         let mut base = Word::<N>::new();
-        base.query(
-            |_word| true,
+        base.search(
             |word| {
                 words.push(word.clone());
             },
@@ -97,8 +94,8 @@ impl<const N: usize> Bot<N> {
     }
 
     pub fn request_guesses(&self) -> impl Iterator<Item = (NotNan<f32>, Word<N>)> {
-        let total = self.words.len();
-        let counter = AtomicUsize::new(0);
+        //let total = self.words.len();
+        //let counter = AtomicUsize::new(0);
 
         let mut heap: BinaryHeap<_> = self
             .words
@@ -107,16 +104,38 @@ impl<const N: usize> Bot<N> {
                 let entropy = compute_entropy(guess, &self.words);
                 (entropy, guess.clone())
             })
-            .inspect(|_| {
-                let k = counter.fetch_add(1, Ordering::AcqRel);
-                if (total - k) % 100 == 0 {
-                    let progress = k as f32 / total as f32;
-                    print!("\r | progress: {:.2}%", 100.0 * progress);
-                    std::io::stdout().flush().unwrap();
-                }
-            })
+            //.inspect(|_| {
+            //    let k = counter.fetch_add(1, Ordering::AcqRel);
+            //    if (total - k) % 100 == 0 {
+            //        let progress = k as f32 / total as f32;
+            //        print!("\r | progress: {:.2}%", 100.0 * progress);
+            //        std::io::stdout().flush().unwrap();
+            //    }
+            //})
             .collect();
 
         std::iter::from_fn(move || heap.pop())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn small_game() {
+        let solution: Word<6> = "3*4=12".parse().unwrap();
+
+        let mut bot = Bot::init();
+        let mut tries = 0;
+
+        while let Some((_, guess)) = bot.request_guesses().next() {
+            println!(" -> {guess}");
+            let hints = compare_words(&guess, &solution);
+            bot.register_guess(guess, hints);
+            tries += 1;
+        }
+
+        assert!(tries < 6);
     }
 }

@@ -15,6 +15,7 @@ impl Interval {
         Self { start, end }
     }
 
+    #[cfg(test)]
     pub fn empty() -> Self {
         Self { start: 1, end: 0 }
     }
@@ -27,6 +28,7 @@ impl Interval {
         self.end < self.start
     }
 
+    #[cfg(test)]
     pub fn contains(&self, item: i32) -> bool {
         self.start <= item && item <= self.end
     }
@@ -93,10 +95,12 @@ impl Domain {
         self.ranges.iter().all(|r| r.is_empty())
     }
 
+    #[cfg(test)]
     pub fn contains(&self, item: i32) -> bool {
         self.ranges.iter().any(|r| r.contains(item))
     }
 
+    #[cfg(test)]
     pub fn range(&self) -> Interval {
         self.ranges
             .iter()
