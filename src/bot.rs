@@ -1,7 +1,4 @@
-use std::{
-    collections::{BinaryHeap, HashMap},
-    mem::MaybeUninit,
-};
+use std::collections::{BinaryHeap, HashMap};
 
 use ordered_float::NotNan;
 use rayon::prelude::*;
@@ -15,37 +12,33 @@ pub enum Color {
     Black,
 }
 
-fn compare_words<const N: usize>(guess: &Word<N>, solution: &Word<N>) -> [Color; N] {
-    // SAFETY: An uninitialized `[MaybeUninit<_>; _]` is valid.
-    let mut hints: [MaybeUninit<_>; N] = unsafe { MaybeUninit::uninit().assume_init() };
+pub fn compare_words<const N: usize>(guess: &Word<N>, answer: &Word<N>) -> [Color; N] {
+    let mut hints: [Color; N] = [Color::Black; N];
+    let mut answer = answer.clone();
 
     for index in 0..N {
-        let curr = guess[index];
-
-        if curr == solution[index] {
-            hints[index].write(Color::Green);
-            continue;
+        if guess[index] == answer[index] {
+            hints[index] = Color::Green;
+            answer[index] = Symbol::Unknown;
         }
-
-        let occ_in_solution = solution.iter().filter(|&s| s == &curr).count();
-        let occ_in_guess = guess.iter().take(index).filter(|&s| s == &curr).count();
-
-        if occ_in_solution > occ_in_guess {
-            hints[index].write(Color::Purple);
-            continue;
-        }
-
-        hints[index].write(Color::Black);
     }
 
-    // SAFETY:
-    // * All elements of the array are initialized
-    // * `MaybeUninit<T>` and `T` are guaranteed to have the same layout
-    // * `MaybeUninit` does not drop, so there are no double-frees
-    unsafe { (&hints as *const _ as *const [_; N]).read() }
+    for index in 0..N {
+        if hints[index] == Color::Green {
+            continue;
+        }
+
+        let guess_sym = &guess[index];
+        if let Some(answer_sym) = answer.iter_mut().find(|s| s == &guess_sym) {
+            hints[index] = Color::Purple;
+            *answer_sym = Symbol::Unknown;
+        }
+    }
+
+    hints
 }
 
-fn compute_entropy<const N: usize>(guess: &Word<N>, word_list: &[Word<N>]) -> NotNan<f32> {
+pub fn compute_entropy<const N: usize>(guess: &Word<N>, word_list: &[Word<N>]) -> NotNan<f32> {
     let mut buckets = HashMap::<[Color; N], usize>::new();
     for word in word_list {
         let hint = compare_words(guess, word);
@@ -71,21 +64,29 @@ fn compute_entropy<const N: usize>(guess: &Word<N>, word_list: &[Word<N>]) -> No
     acc
 }
 
+#[derive(Debug, Clone)]
 pub struct Bot<const N: usize> {
     pub words: Vec<Word<N>>,
+    pub answers: Vec<Word<N>>,
 }
 
 impl<const N: usize> Bot<N> {
     pub fn init() -> Self {
         let mut words = Vec::new();
         let mut base = Word::<N>::new();
-        base.search(
-            |word| {
-                words.push(word.clone());
-            },
-        );
+        base.search(|word| {
+            words.push(word.clone());
+        });
 
-        Self { words }
+        words.sort();
+
+        let answers = words
+            .iter()
+            .filter(|word| word.is_valid_answer())
+            .cloned()
+            .collect();
+
+        Self { words, answers }
     }
 
     pub fn register_guess(&mut self, guess: Word<N>, hints: [Color; N]) {
@@ -101,9 +102,10 @@ impl<const N: usize> Bot<N> {
             .words
             .par_iter()
             .map(|guess| {
-                let entropy = compute_entropy(guess, &self.words);
+                let entropy = compute_entropy(guess, &self.answers);
                 (entropy, guess.clone())
             })
+            .filter(|(entropy, guess)| entropy.into_inner() > 0.0 || self.answers.contains(guess))
             //.inspect(|_| {
             //    let k = counter.fetch_add(1, Ordering::AcqRel);
             //    if (total - k) % 100 == 0 {
@@ -123,19 +125,38 @@ mod test {
     use super::*;
 
     #[test]
-    fn small_game() {
-        let solution: Word<6> = "3*4=12".parse().unwrap();
+    fn tiny_game() {
+        let solution: Word<5> = "2*3=6".parse().unwrap();
 
-        let mut bot = Bot::init();
+        let mut nerd = Bot::init();
         let mut tries = 0;
 
-        while let Some((_, guess)) = bot.request_guesses().next() {
-            println!(" -> {guess}");
-            let hints = compare_words(&guess, &solution);
-            bot.register_guess(guess, hints);
-            tries += 1;
-        }
+        while let Some((entropy, guess)) = nerd.request_guesses().next() {
+            println!(" -> {guess} ({entropy:.3})");
 
-        assert!(tries < 6);
+            let hints = compare_words(&guess, &solution);
+            nerd.register_guess(guess, hints);
+            tries += 1;
+
+            assert!(tries < 6);
+        }
+    }
+
+    #[test]
+    fn small_game() {
+        let solution: Word<6> = "3*5=15".parse().unwrap();
+
+        let mut nerd = Bot::init();
+        let mut tries = 0;
+
+        while let Some((_entropy, guess)) = nerd.request_guesses().next() {
+            println!(" -> {guess}");
+
+            let hints = compare_words(&guess, &solution);
+            nerd.register_guess(guess, hints);
+            tries += 1;
+
+            assert!(tries < 6);
+        }
     }
 }

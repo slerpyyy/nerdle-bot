@@ -160,6 +160,57 @@ fn possible(symbols: &[Symbol]) -> bool {
     !left.intersection(&right).is_empty()
 }
 
+fn valid_answer(symbols: &[Symbol]) -> bool {
+    let double_ops = !symbols
+        .iter()
+        .skip(1)
+        .zip(symbols)
+        .all(|(a, b)| matches!(a, &Symbol::Digit(_)) || matches!(b, &Symbol::Digit(_)));
+
+    if double_ops {
+        return false;
+    }
+
+    let eq_index = match symbols.iter().position(|s| s == &Symbol::Equals) {
+        Some(index) => index,
+        None => return false,
+    };
+
+    let left = &symbols[..eq_index];
+    let right = &symbols[(eq_index + 1)..];
+
+    let valid_right = match right {
+        [] => false,
+        [Symbol::Digit(_)] => true,
+        [Symbol::Digit(0), ..] => false,
+        s => s.iter().all(|s| matches!(s, Symbol::Digit(_))),
+    };
+
+    if !valid_right {
+        return false;
+    }
+
+    let valid_left = {
+        let mut valid = true;
+        let mut allow_zero = false;
+        for s in left {
+            match s {
+                Symbol::Digit(0) if !allow_zero => {
+                    valid = false;
+                    break;
+                }
+
+                Symbol::Digit(_) => allow_zero = true,
+                _ => allow_zero = false,
+            }
+        }
+
+        valid
+    };
+
+    valid_left
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Word<const N: usize = 8> {
     pub symbols: [Symbol; N],
@@ -192,13 +243,17 @@ impl<const N: usize> Word<N> {
         }
     }
 
-    fn is_possible(&self) -> bool {
+    pub fn is_possible(&self) -> bool {
         possible(&self.symbols)
     }
 
     #[cfg(test)]
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         self.symbols.iter().all(|sym| sym != &Symbol::Unknown) && self.is_possible()
+    }
+
+    pub fn is_valid_answer(&self) -> bool {
+        valid_answer(&self)
     }
 
     fn search_digits(&mut self, observer: &mut impl FnMut(&Self)) {

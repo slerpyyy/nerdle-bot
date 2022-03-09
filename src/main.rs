@@ -13,6 +13,10 @@ fn main() {
     let mut bot = Bot::<N>::init();
 
     while !bot.words.is_empty() {
+        println!("Current counts");
+        println!(" | words:   {}", bot.words.len());
+        println!(" | answers: {}", bot.answers.len());
+
         println!("Computing entropy");
         let iter = bot.request_guesses();
 
