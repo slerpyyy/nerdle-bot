@@ -4,23 +4,25 @@
 This is a solver for the game [Nerdle](https://nerdlegame.com/), a Wordle clone where instead of guessing 5-letter words, you guess a valid 8-character mathematical equation.
 The bot uses a similar approach as the one described in the famous [Solving Wordle using information theory](https://www.youtube.com/watch?v=v68zYyaEmEA) video by [3Blue1Brown](https://www.youtube.com/@3blue1brown).
 
-The thing that sets this project appart from other wordle solvers is that there is no official wordlist for Nerdle, meaning the exhaustive list of possible equations must be computed first.
-This is done using a recusive tree search with backtracking (similar to how you'd solve a sudoku), i.e. the word starts as `????????`, then we place the `=` sign, then some operators and finally fill in the numbers.
-Words are evaluated and validated using a simple pecedence-climbing recursive descent parser.
+The thing that sets this project apart from other wordle solvers is that there is no official wordlist for Nerdle, meaning the exhaustive list of possible equations must be computed first.
+This is done using a recursive tree search with backtracking (similar to how you'd solve a sudoku), i.e. the word starts as `????????`, then we place the `=` sign, then some operators and finally fill in the numbers.
+Words are evaluated and validated using a simple precedence-climbing recursive descent parser.
 Branches are pruned early using range evaluation.
 
 ## Usage
 
-After starting the program, the bot computes the entropy for each guess and prints out a ranking of valid guesses, listed best to worst.
+After starting the program, the bot computes the entropy for each guess and prints out a ranking of valid guesses, listed from best to worst.
 Once you made your guess in Nerdle, you report back the guess you chose and the color hints you got back (**b**lack, **p**urple, or **g**reen).
+This process repeats until the game is over.
+Note that the first scan takes by far the longest time to compute.
 
-Here is a log of todays Nerdle (12.09.2023):
+Here is a log of today's Nerdle (12.09.2023):
 
 ```
 Current counts
  | words:   135975
- | answers: 17171 
-Computing entropy 
+ | answers: 17171
+Computing entropy
  | progress: 100.00%
 Ranking
  | 48-32=16 (9.779 bits)
@@ -36,11 +38,11 @@ Ranking
 Dialog
  | guess: 48-32=16
  | hints: pppbppbb
-Current counts    
+Current counts
  | words:   135975
- | answers: 22    
-Computing entropy 
- | progress: 100.00%    
+ | answers: 22
+Computing entropy
+ | progress: 100.00%
 Ranking
  | 8*04/4=8 (4.369 bits)
  | 7-24/8=4 (4.369 bits)
