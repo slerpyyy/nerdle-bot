@@ -12,15 +12,30 @@ const N: usize = 8;
 fn main() {
     let mut bot = Bot::<N>::init();
 
-    while !bot.words.is_empty() {
+    loop {
         println!("Current counts");
         println!(" | words:   {}", bot.words.len());
         println!(" | answers: {}", bot.answers.len());
 
         println!("Computing entropy");
         let iter = bot.request_guesses();
+        let guesses: Vec<_> = iter.take(10).collect();
 
-        for (entropy, word) in iter.take(10) {
+        if guesses.is_empty() {
+            println!("No more guesses!\n");
+            println!("Every possible answer has been ruled out.");
+            println!("This should never happen.");
+            println!("Make sure you transcribed the guesses and colors correctly.");
+            return;
+        }
+
+        if let [(_, guess)] = &guesses[..] {
+            println!("The answer is: {guess}");
+            return;
+        }
+
+        println!("Ranking");
+        for (entropy, word) in guesses {
             println!(" | {word} ({entropy:.3} bits)");
         }
 
@@ -50,6 +65,11 @@ fn main() {
                     'g' => Color::Green,
                     _ => panic!("idk what {char:?} is"),
                 };
+            }
+
+            if hints.iter().all(|h| h == &Color::Green) {
+                println!("What a great guess!");
+                return;
             }
 
             hints

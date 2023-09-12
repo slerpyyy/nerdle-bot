@@ -1,4 +1,7 @@
-use std::collections::{BinaryHeap, HashMap};
+use std::{
+    collections::{BinaryHeap, HashMap},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use ordered_float::NotNan;
 use rayon::prelude::*;
@@ -90,13 +93,13 @@ impl<const N: usize> Bot<N> {
     }
 
     pub fn register_guess(&mut self, guess: Word<N>, hints: [Color; N]) {
-        self.words
+        self.answers
             .retain(|word| word != &guess && compare_words(&guess, word) == hints);
     }
 
     pub fn request_guesses(&self) -> impl Iterator<Item = (NotNan<f32>, Word<N>)> {
-        //let total = self.words.len();
-        //let counter = AtomicUsize::new(0);
+        let total = self.words.len();
+        let counter = AtomicUsize::new(0);
 
         let mut heap: BinaryHeap<_> = self
             .words
@@ -105,16 +108,24 @@ impl<const N: usize> Bot<N> {
                 let entropy = compute_entropy(guess, &self.answers);
                 (entropy, guess.clone())
             })
-            .filter(|(entropy, guess)| entropy.into_inner() > 0.0 || self.answers.contains(guess))
-            //.inspect(|_| {
-            //    let k = counter.fetch_add(1, Ordering::AcqRel);
-            //    if (total - k) % 100 == 0 {
-            //        let progress = k as f32 / total as f32;
-            //        print!("\r | progress: {:.2}%", 100.0 * progress);
-            //        std::io::stdout().flush().unwrap();
-            //    }
-            //})
+            .filter(|(entropy, guess)| {
+                if entropy.into_inner() > 0.0 {
+                    return true;
+                }
+
+                self.answers.binary_search(guess).is_ok()
+            })
+            .inspect(|_| {
+                let k = counter.fetch_add(1, Ordering::Relaxed);
+                if k % 100 == 0 {
+                    let progress = k as f32 / total as f32;
+                    print!("\r | progress: {:.2}%", 100.0 * progress);
+                    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+                }
+            })
             .collect();
+
+        println!("\r | progress: 100.00%");
 
         std::iter::from_fn(move || heap.pop())
     }
@@ -123,6 +134,27 @@ impl<const N: usize> Bot<N> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn bot_init() {
+        let nerd = Bot::<5>::init();
+
+        for word in &nerd.answers {
+            print!("{word} ")
+        }
+
+        println!("\n----");
+
+        for word in &nerd.words {
+            if nerd.answers.contains(word) {
+                continue;
+            }
+
+            print!("{word} ")
+        }
+
+        print!("\n");
+    }
 
     #[test]
     fn tiny_game() {

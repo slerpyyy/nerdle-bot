@@ -61,12 +61,12 @@ fn eval_ranged_digits_unsigned(mut symbols: &[Symbol]) -> Option<(Domain, &[Symb
     let mut min_acc: i32 = 0;
     let mut max_acc: i32 = 0;
 
-    let mut first_digit = true;
+    //let mut first_digit = true;
     while let [digit, tail @ ..] = symbols {
         let (min_digit, max_digit) = match *digit {
-            Symbol::Digit(0) if first_digit => return None,
+            //Symbol::Digit(0) if first_digit => return None,
             Symbol::Digit(d) => (d, d),
-            Symbol::Unknown if first_digit => (1, 9),
+            //Symbol::Unknown if first_digit => (1, 9),
             Symbol::Unknown => (0, 9),
             _ => break,
         };
@@ -75,7 +75,7 @@ fn eval_ranged_digits_unsigned(mut symbols: &[Symbol]) -> Option<(Domain, &[Symb
         max_acc = max_acc * 10 + (max_digit as i32);
 
         symbols = tail;
-        first_digit = false;
+        //first_digit = false;
     }
 
     let range = Interval::new(min_acc, max_acc);
@@ -145,6 +145,10 @@ fn eval(symbols: &[Symbol]) -> Option<i32> {
 }
 
 fn possible(symbols: &[Symbol]) -> bool {
+    if symbols.first() == Some(&Symbol::Minus) {
+        return false;
+    }
+
     let (left, symbols) = match eval_ranged_add(symbols) {
         Some((left, [Symbol::Equals, tail @ ..])) => (left, tail),
         _ => return false,
@@ -193,6 +197,7 @@ fn valid_answer(symbols: &[Symbol]) -> bool {
     let valid_left = {
         let mut valid = true;
         let mut allow_zero = false;
+
         for s in left {
             match s {
                 Symbol::Digit(0) if !allow_zero => {
@@ -432,9 +437,9 @@ mod test {
         ];
         let value = eval_ranged(&symbols).unwrap();
 
-        // Min: 1 * 1 + 1 = 2
+        // Min: 0 * 0 + 0 = 0
         // Max: 9 * 9 + 9 = 9 * 10 = 90
-        assert_eq!(value.range(), Interval::new(2, 90));
+        assert_eq!(value.range(), Interval::new(0, 90));
     }
 
     #[test]
@@ -494,8 +499,8 @@ mod test {
     }
 
     #[test]
-    fn possible_false_tricky() {
+    fn possible_true_tricky() {
         let word: Word<8> = "??/?=???".parse().unwrap();
-        assert!(!possible(&word.symbols));
+        assert!(possible(&word.symbols));
     }
 }
