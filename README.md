@@ -64,3 +64,12 @@ Computing entropy
  | progress: 100.00%
 The answer is: 8-54/9=2
 ```
+
+## Opinions
+
+- A fraustated user
+    > This bot killed the fun out of simple math game.
+
+
+- Another fraustated user
+    > Things were fun until the bot arrived and solved everything.
